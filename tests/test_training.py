@@ -6,9 +6,10 @@ from tests.support import training
 
 
 class TrainingLifecycleTests(unittest.TestCase):
-    def run_generation(self, lifetimes, death_causes, food_on_first_tick=False):
+    def run_generation(self, lifetimes, death_causes, food_on_first_tick=False, network_output=0):
         created = []
         genomes = [SimpleNamespace(index=i, fitness=None, observations=[]) for i in range(24)]
+        testcase = self
 
         class FakeGame:
             def __init__(self, win, index, start_x, start_y):
@@ -24,6 +25,10 @@ class TrainingLifecycleTests(unittest.TestCase):
             def run(self):
                 if self.snake.collided or self.snake.energy <= 0:
                     raise AssertionError("A terminated game received an extra tick")
+                if network_output > 0.5:
+                    testcase.assertEqual(self.snake.turn_right.call_count, self.ticks + 1)
+                elif network_output < -0.5:
+                    testcase.assertEqual(self.snake.turn_left.call_count, self.ticks + 1)
                 self.ticks += 1
                 self.snake.energy -= 1
                 self.got_bait = food_on_first_tick and self.ticks == 1
@@ -33,18 +38,17 @@ class TrainingLifecycleTests(unittest.TestCase):
                     else:
                         self.snake.energy = 0
 
-            def calc_border_distance(self):
-                return self.index, 10, 20
-
-            def distance_to_bait(self, *args):
-                return 10
+            def get_observation(self):
+                # The ID is a sentinel to detect mismatched games and networks.
+                return self.index, 0, 0, 1, -1
 
         def make_network(genome, config):
             def activate(observation):
+                self.assertEqual(len(observation), 5)
                 self.assertEqual(observation[0], genome.index,
                                  "Game and genome were paired incorrectly")
                 genome.observations.append(observation)
-                return [0]
+                return [network_output]
             return SimpleNamespace(activate=activate)
 
         with patch.object(training, "Game", FakeGame), \
@@ -69,3 +73,8 @@ class TrainingLifecycleTests(unittest.TestCase):
         self.run_generation([2 + i % 3 for i in range(24)],
                             ["collision" if i % 2 else "energy" for i in range(24)],
                             food_on_first_tick=True)
+
+    def test_controller_acts_before_the_first_and_every_subsequent_move(self):
+        for output in (-1, 1):
+            with self.subTest(output=output):
+                self.run_generation([2] * 24, ["energy"] * 24, network_output=output)

@@ -55,6 +55,35 @@ class Game:
 
         self.draw_game(self.win)
 
+    def get_observation(self):
+        """Return three danger flags and two relative food direction signs.
+
+        Order: danger ahead/left/right, food ahead/behind, food right/left.
+        Danger is 0 or 1; food is -1, 0, or 1 (positive: ahead/right).
+        """
+        vectors = {0: (0, -1), 90: (1, 0), 180: (0, 1), 270: (-1, 0)}
+        forward_x, forward_y = vectors[self.snake.direction]
+        left = (forward_y, -forward_x)
+        right = (-forward_y, forward_x)
+        step = self.snake.body_part_distance
+        # The tail vacates its cell before Snake.move checks self-collisions.
+        occupied = set(self.snake.body_parts[:-1])
+        danger = []
+        for dx, dy in ((forward_x, forward_y), left, right):
+            next_x = self.snake.x_head_pos + dx * step
+            next_y = self.snake.y_head_pos + dy * step
+            hits_wall = (next_x <= self.start_point_x or next_x >= self.end_point_x
+                         or next_y <= self.start_point_y + self.offset
+                         or next_y >= self.end_point_y + self.offset)
+            danger.append(int(hits_wall or (next_x, next_y) in occupied))
+
+        food_x = self.bait.x - self.snake.x_head_pos
+        food_y = self.bait.y - self.snake.y_head_pos
+        food_forward = food_x * forward_x + food_y * forward_y
+        food_right = food_x * right[0] + food_y * right[1]
+        return (*danger, (food_forward > 0) - (food_forward < 0),
+                (food_right > 0) - (food_right < 0))
+
     def calc_border_distance(self):
         """Return distances to the last safe cells ahead, left, and right."""
         distances = {

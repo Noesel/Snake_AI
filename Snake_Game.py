@@ -51,27 +51,18 @@ def main(genomes, config):
             break
 
         for x, _ in enumerate(games):
-            games[x].run()
-            distance = games[x].calc_border_distance()
-            front = distance[0]
-            left = distance[1]
-            right = distance[2]
-
-            distance_to_bait = games[x].distance_to_bait(games[x].bait.x, games[x].bait.y, games[x].snake.x_head_pos,
-                                  games[x].snake.y_head_pos)
-
-            output = nets[x].activate((front, left, right, distance_to_bait))
-
-            if games[x].got_bait:
-                gen[x].fitness += 100
-                games[x].snake.energy += 20
+            output = nets[x].activate(games[x].get_observation())
 
             if output[0] > 0.5:
                 games[x].snake.turn_right()
             elif output[0] < -0.5:
                 games[x].snake.turn_left()
 
-        # Remove backwards so adjacent terminal games cannot be skipped.
+            games[x].run()
+            if games[x].got_bait:
+                gen[x].fitness += 100
+                games[x].snake.energy += 20
+
         for i in range(len(games) - 1, -1, -1):
             if games[i].snake.collided or games[i].snake.energy <= 0:
                 gen[i].fitness -= 10

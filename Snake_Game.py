@@ -71,14 +71,9 @@ def main(genomes, config):
             elif output[0] < -0.5:
                 games[x].snake.turn_left()
 
-        for i, _ in enumerate(games):
-            delete = False
-            if games[i].snake.collided:
-                delete = True
-            if games[i].snake.energy <= 0:
-                delete = True
-
-            if delete:
+        # Remove backwards so adjacent terminal games cannot be skipped.
+        for i in range(len(games) - 1, -1, -1):
+            if games[i].snake.collided or games[i].snake.energy <= 0:
                 gen[i].fitness -= 10
                 games.pop(i)
                 gen.pop(i)

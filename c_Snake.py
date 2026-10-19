@@ -66,12 +66,8 @@ class Snake:
         self.body_parts.append(self.last_body_part)
 
     def turn_right(self):
-        self.direction += 90
-        if self.direction == 360:
-            self.direction == 0
+        self.direction = (self.direction + 90) % 360
 
     def turn_left(self):
-        self.direction -= 90
-        if self.direction == -90:
-            self.direction = 270
+        self.direction = (self.direction - 90) % 360
 

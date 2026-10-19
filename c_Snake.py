@@ -1,5 +1,3 @@
-import pygame
-
 class Snake:
     def __init__(self, start_point_x, start_point_y, end_point_x, end_point_y, move_distance, offset):
         self.screen_startpoint_x = start_point_x
@@ -25,12 +23,13 @@ class Snake:
         self.last_body_part = (self.body_parts[-1])
 
     def draw(self, screen):
+        import pygame
+
         for parts in range(len(self.body_parts)):
             if parts > 0:
                 pygame.draw.circle(screen, (255, 255, 255), self.body_parts[parts], self.body_radius)
             else:
                 pygame.draw.circle(screen, (255, 0, 0), self.body_parts[0], self.body_radius)
-        pygame.display.update()
 
     def move(self):
         self.last_body_part = self.body_parts[-1]
@@ -70,4 +69,3 @@ class Snake:
 
     def turn_left(self):
         self.direction = (self.direction - 90) % 360
-

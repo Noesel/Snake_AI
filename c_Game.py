@@ -1,4 +1,3 @@
-import pygame
 import math
 
 from c_Snake import Snake
@@ -7,10 +6,11 @@ from c_Playboard import Playboard
 
 
 class Game:
-    def __init__(self, win, game_instance, start_x, start_y):
-        self.STAT_FONT = pygame.font.SysFont("comicssans", 25)
+    def __init__(self, win, game_instance, start_x, start_y, rng=None):
+        if win is not None:
+            import pygame
+            self.STAT_FONT = pygame.font.SysFont(None, 25)
         self.win = win
-        self.clock = pygame.time.Clock()
         self.offset = 20
         self.start_point_x = start_x
         self.start_point_y = start_y
@@ -23,12 +23,12 @@ class Game:
         self.playboard = Playboard(self.start_point_x, self.start_point_y, self.end_point_x, self.end_point_y, self.offset)
         self.snake = Snake(self.start_point_x, self.start_point_y, self.end_point_x, self.end_point_y, self.move_distance, self.offset)
 
-        self.bait = Bait(self.start_point_x, self.start_point_y, self.screen_width, self.screen_height, self.move_distance, self.offset)
+        self.bait = Bait(self.start_point_x, self.start_point_y, self.screen_width, self.screen_height, self.move_distance, self.offset, rng=rng)
         self.bait.generate_pos(self.snake)
         self.got_bait = False
         self.score = 0
         self.game_instance = game_instance
-        self.win.fill((50, 50, 50))
+        self.completed = False
 
     def draw_game(self, win):
         self.playboard.draw(win)
@@ -42,18 +42,23 @@ class Game:
 
         self.snake.draw(win)
 
+    @property
+    def done(self):
+        return self.completed or self.snake.collided or self.snake.energy <= 0
+
     def run(self):
         self.got_bait = False
-        if not self.snake.collided:
-            self.snake.move()
-
-        if self.snake.x_head_pos == self.bait.x and self.snake.y_head_pos == self.bait.y:
+        if self.done:
+            return
+        self.snake.move()
+        if not self.snake.collided and (self.snake.x_head_pos, self.snake.y_head_pos) == (self.bait.x, self.bait.y):
             self.got_bait = True
-            self.bait.generate_pos(self.snake)
             self.snake.grow()
             self.score += 1
-
-        self.draw_game(self.win)
+            # Grow first so new food cannot spawn on the newly added tail.
+            self.completed = not self.bait.generate_pos(self.snake)
+        if self.win is not None:
+            self.draw_game(self.win)
 
     def get_observation(self):
         """Return three danger flags and two relative food direction signs.

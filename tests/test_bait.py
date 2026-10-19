@@ -33,3 +33,19 @@ class BaitTests(unittest.TestCase):
         self.assertEqual((bait.x, bait.y), (10, 50))
         for call in randint.call_args_list:
             self.assertTrue(all(isinstance(bound, int) for bound in call.args))
+
+    def test_full_board_terminates_food_placement(self):
+        snake = make_snake()
+        snake.body_parts = [(x, y) for y in range(50, 260, 10) for x in range(10, 220, 10)]
+        bait = Bait(0, 20, 220, 220, 10, 20, rng=random.Random(1))
+        self.assertFalse(bait.generate_pos(snake))
+        self.assertEqual((bait.x, bait.y), (None, None))
+
+    def test_dense_board_fallback_finds_the_only_free_cell(self):
+        snake = make_snake()
+        snake.body_parts = [(x, y) for y in range(50, 260, 10) for x in range(10, 220, 10)
+                            if (x, y) != (210, 250)]
+        bait = Bait(0, 20, 220, 220, 10, 20, rng=random.Random(1))
+        with patch.object(bait.rng, 'randint', return_value=1):
+            self.assertTrue(bait.generate_pos(snake))
+        self.assertEqual((bait.x, bait.y), (210, 250))

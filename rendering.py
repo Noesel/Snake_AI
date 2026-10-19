@@ -1,60 +1,54 @@
-"""Optional pygame visualization. Workers never import this module."""
+"""Optional preview of the best TensorNEAT genome; training stays on device."""
 
-import random
+import jax
+import jax.numpy as jnp
+import numpy as np
 
+import jax_snake as snake
 from c_Game import Game
-from evaluation import EpisodeResult, GenomeResult, step_game
 
 
-class PopulationRenderer:
-    def __init__(self, fps=60):
+class TensorRenderer:
+    def __init__(self, algorithm, fps=60):
         import pygame
-
         self.pygame = pygame
         pygame.init()
-        self.window = pygame.display.set_mode((1850, 1000))
+        self.window = pygame.display.set_mode((520, 600))
+        self.canvas = pygame.Surface((260, 300))
+        self.game = Game(self.canvas, 0, 20, 20)
         self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont(None, 25)
         self.fps = fps
-        self.generation = 0
+        self.algorithm = algorithm
+        self.advance = jax.jit(lambda state, params, game: snake.step(
+            game, algorithm.forward(state, params, snake.observe(game))[0]))
 
     def close(self):
         self.pygame.quit()
 
-    def evaluate(self, genomes, config, seeds, max_steps):
-        import neat
-
+    def show(self, state, best, config, generation):
         pygame = self.pygame
-        episodes = {gid: [] for gid, _ in genomes}
-        for start in range(0, len(genomes), 24):
-            batch = genomes[start:start + 24]
-            networks = {gid: neat.nn.FeedForwardNetwork.create(genome, config)
-                        for gid, genome in batch}
-            for episode_number, seed in enumerate(seeds, 1):
-                self.window.fill((50, 50, 50))
-                active = []
-                for index, (gid, _) in enumerate(batch):
-                    game = Game(self.window, start + index, (index % 8) * 230,
-                                20 + (index // 8) * 280, rng=random.Random(seed))
-                    active.append([gid, game, 0])
-                while active:
-                    for event in pygame.event.get():
-                        if event.type == pygame.QUIT:
-                            raise KeyboardInterrupt
-                    remaining = []
-                    for gid, game, steps in active:
-                        step_game(game, networks[gid])
-                        steps += 1
-                        if game.done or steps >= max_steps:
-                            episodes[gid].append(EpisodeResult(game.score, steps))
-                        else:
-                            remaining.append([gid, game, steps])
-                    active = remaining
-                    pygame.draw.rect(self.window, (50, 50, 50), (0, 0, 1850, 20))
-                    text = f"Generation {self.generation + 1} | Episode {episode_number}/{len(seeds)} | Genomes {start + 1}-{start + len(batch)}"
-                    self.window.blit(self.font.render(text, True, (255, 255, 255)), (10, 0))
-                    pygame.display.flip()
-                    if self.fps:
-                        self.clock.tick(self.fps)
-        self.generation += 1
-        return {gid: GenomeResult(tuple(results)) for gid, results in episodes.items()}
+        pygame.display.set_caption(f"TensorNEAT generation {generation} | best fitness {best['fitness']:.1f}")
+        params = self.algorithm.transform(state, (jnp.asarray(best['nodes']), jnp.asarray(best['conns'])))
+        game = snake.reset(state.snake_episode_keys[0])
+        for _ in range(config.max_steps):
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    raise KeyboardInterrupt
+            game = self.advance(state, params, game)
+            snapshot = jax.device_get(game)
+            indices = (int(snapshot.tail) + np.arange(int(snapshot.length))) % snake.CAPACITY
+            body = snapshot.body[indices][::-1]
+            self.game.snake.body_parts = [(20 + 10 + int(cell % snake.WIDTH) * 10,
+                                           20 + 20 + 10 + int(cell // snake.WIDTH) * 10) for cell in body]
+            food = int(snapshot.food)
+            self.game.bait.x = None if food < 0 else 20 + 10 + (food % snake.WIDTH) * 10
+            self.game.bait.y = None if food < 0 else 20 + 20 + 10 + (food // snake.WIDTH) * 10
+            self.game.score = int(snapshot.score)
+            self.canvas.fill((50, 50, 50))
+            self.game.draw_game(self.canvas)
+            self.window.blit(pygame.transform.scale(self.canvas, self.window.get_size()), (0, 0))
+            pygame.display.flip()
+            if self.fps:
+                self.clock.tick(self.fps)
+            if bool(snapshot.done):
+                break

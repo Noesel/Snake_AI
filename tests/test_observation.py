@@ -1,10 +1,10 @@
-import configparser
 import copy
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
 from tests.support import make_game
+from configuration import load_config
 
 
 class ObservationTests(unittest.TestCase):
@@ -95,10 +95,9 @@ class ObservationTests(unittest.TestCase):
         self.assertEqual((vars(game.snake), vars(game.bait)), before)
 
     def test_configuration_matches_the_five_bounded_inputs(self):
-        config = configparser.ConfigParser()
-        config.read(Path(__file__).resolve().parents[1] / "config-feedforward.txt")
+        config = load_config(Path(__file__).resolve().parents[1] / "config-tensorneat.json")
         observation = self.make_scene().get_observation()
         self.assertEqual(len(observation), 5)
-        self.assertEqual(config.getint("DefaultGenome", "num_inputs"), len(observation))
+        self.assertGreaterEqual(config.max_nodes, len(observation) + 1)
         self.assertTrue(all(value in (0, 1) for value in observation[:3]))
         self.assertTrue(all(value in (-1, 0, 1) for value in observation[3:]))

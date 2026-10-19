@@ -1,4 +1,4 @@
-"""Snake training entry point, safe for multiprocessing spawn on Windows/Linux."""
+"""Entry point for TensorNEAT training and the optional Snake preview."""
 
 from training import main
 

@@ -1,211 +1,191 @@
-"""NEAT coordinator, command line, metrics, and resumable run artifacts."""
+"""TensorNEAT/JAX training, device selection, metrics, and portable run state."""
 
 import argparse
-import copy
-from dataclasses import dataclass
+from dataclasses import asdict, replace
 import gzip
 import json
 import os
 from pathlib import Path
 import pickle
-import random
+import time
 import uuid
 
-from evaluation import PopulationEvaluator
+from configuration import TrainingConfig, TENSORNEAT_REVISION, load_config
+
+
+FORMAT = 'snake-tensorneat-v1'
 
 
 def positive(value):
     value = int(value)
     if value < 1:
-        raise argparse.ArgumentTypeError("must be positive")
+        raise argparse.ArgumentTypeError('must be positive')
     return value
 
 
 def nonnegative(value):
     value = int(value)
     if value < 0:
-        raise argparse.ArgumentTypeError("must be nonnegative")
+        raise argparse.ArgumentTypeError('must be nonnegative')
     return value
 
 
 def parser():
-    cli = argparse.ArgumentParser(description="Train Snake with optional CPU parallelism")
-    cli.add_argument("--headless", action="store_true", help="no pygame import or window")
-    cli.add_argument("--workers", type=nonnegative, help="headless processes; 0/omitted: automatic")
-    cli.add_argument("--generations", type=positive, default=1000, help="generations to run, including after resume")
-    cli.add_argument("--population", type=positive, help="override configuration population size")
-    cli.add_argument("--episodes", type=positive, help="shared evaluation seeds per genome (default: 5)")
-    cli.add_argument("--seed", type=int, help="reproducible run seed (default: 42)")
-    cli.add_argument("--max-steps", type=positive, help="hard episode step limit (default: 10000)")
-    cli.add_argument("--fps", type=nonnegative, default=60, help="visual mode only; 0: unlimited")
-    cli.add_argument("--stop-at-target", action="store_true", help="stop early at configured fitness threshold")
-    cli.add_argument("--checkpoint-every", type=nonnegative, default=10, help="checkpoint interval; 0: final only")
-    cli.add_argument("--config", type=Path, default=Path(__file__).with_name("config-feedforward.txt"))
-    cli.add_argument("--output", type=Path, help="artifact directory (default: new directory under runs/)")
-    cli.add_argument("--resume", type=Path, help="resume a checkpoint created by this trainer")
+    cli = argparse.ArgumentParser(description='Train Snake using TensorNEAT and batched JAX simulation')
+    cli.add_argument('--headless', action='store_true', help='no pygame import or preview window')
+    cli.add_argument('--device', choices=('auto', 'cpu', 'gpu'), default='auto')
+    cli.add_argument('--generations', type=positive, default=1000, help='additional generations to run')
+    for name in ('population', 'episodes', 'max-steps', 'max-nodes', 'max-conns', 'batch-size'):
+        cli.add_argument('--' + name, type=positive)
+    cli.add_argument('--seed', type=nonnegative)
+    cli.add_argument('--fps', type=nonnegative, default=60, help='preview FPS; 0: unlimited')
+    cli.add_argument('--stop-at-target', action='store_true', help='stop early at configured mean fitness target')
+    cli.add_argument('--checkpoint-every', type=nonnegative, default=10, help='0: final checkpoint only')
+    cli.add_argument('--config', type=Path, default=Path(__file__).with_name('config-tensorneat.json'))
+    cli.add_argument('--output', type=Path, help='artifact directory; default: new directory under runs/')
+    cli.add_argument('--resume', type=Path, help='TensorNEAT checkpoint created by this trainer')
     return cli
 
 
-def atomic_pickle(path, payload, compressed=False):
-    temporary = path.with_name(path.name + ".tmp")
-    opener = gzip.open if compressed else open
-    with opener(temporary, "wb") as handle:
+def atomic_pickle(path, payload):
+    temporary = path.with_name(path.name + '.tmp')
+    with gzip.open(temporary, 'wb') as handle:
         pickle.dump(payload, handle, protocol=pickle.HIGHEST_PROTOCOL)
     temporary.replace(path)
 
 
-@dataclass
-class SerializableCounter:
-    """Integer counter adapter for runtimes that cannot pickle itertools.count."""
-
-    value: int
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        value = self.value
-        self.value += 1
-        return value
+def save_best(path, config, best):
+    import numpy as np
+    temporary = path.with_name(path.name + '.tmp')
+    with temporary.open('wb') as handle:
+        np.savez_compressed(handle, nodes=best['nodes'], conns=best['conns'],
+                            fitness=best['fitness'], generation=best['generation'],
+                            config=json.dumps(asdict(config)), revision=TENSORNEAT_REVISION)
+    temporary.replace(path)
 
 
-def prepare_checkpoint(population):
-    for owner, name in ((population.config.genome_config, "node_indexer"),
-                        (population.reproduction, "genome_indexer"),
-                        (population.species, "indexer")):
-        counter = getattr(owner, name)
-        if counter is not None and not isinstance(counter, SerializableCounter):
-            # Preserve the next value: consume from the discarded iterator and
-            # start its replacement at that exact value, without skipping IDs.
-            setattr(owner, name, SerializableCounter(next(counter)))
-
-
-def save_checkpoint(path, population, settings, best, generation=None):
-    prepare_checkpoint(population)
-    species = copy.copy(population.species)
-    # Reporters belong to the live coordinator, never to portable state.
-    species.reporters = None
-    atomic_pickle(path, {
-        "version": 1,
-        "config": population.config,
-        "population": population.population,
-        "species": species,
-        "generation": population.generation if generation is None else generation,
-        "genome_indexer": population.reproduction.genome_indexer,
-        "ancestors": population.reproduction.ancestors,
-        "random_state": random.getstate(),
-        "settings": settings,
-        "best": best,
-    }, compressed=True)
+def save_checkpoint(path, config, state, best):
+    import jax
+    atomic_pickle(path, {'format': FORMAT, 'revision': TENSORNEAT_REVISION,
+                         'jax_version': jax.__version__, 'config': asdict(config),
+                         'state': jax.device_get(state), 'best': best})
 
 
 def restore_checkpoint(path):
-    import neat
-
-    with gzip.open(path, "rb") as handle:
-        saved = pickle.load(handle)
-    if saved.get("version") != 1:
-        raise ValueError("Unsupported checkpoint version")
-    population = neat.Population(saved["config"],
-                                 (saved["population"], saved["species"], saved["generation"]))
-    population.species.reporters = population.reporters
-    # NEAT 0.92 otherwise restarts its genome counter at 1 on resume.
-    population.reproduction.genome_indexer = saved["genome_indexer"]
-    population.reproduction.ancestors = saved["ancestors"]
-    population.best_genome = saved["best"]
-    random.setstate(saved["random_state"])
-    return population, saved["settings"], saved["best"]
+    import jax
+    import jax.numpy as jnp
+    try:
+        with gzip.open(path, 'rb') as handle:
+            saved = pickle.load(handle)
+    except ModuleNotFoundError as error:
+        raise ValueError('Legacy neat-python checkpoints cannot be resumed with TensorNEAT') from error
+    if saved.get('format') != FORMAT:
+        raise ValueError('This is not a TensorNEAT Snake checkpoint; neat-python state is incompatible')
+    if saved.get('revision') != TENSORNEAT_REVISION or saved.get('jax_version') != jax.__version__:
+        raise ValueError('Resume requires the same TensorNEAT revision and JAX version')
+    config = TrainingConfig(**saved['config']).validate()
+    return config, jax.tree.map(jnp.asarray, saved['state']), saved['best']
 
 
 def main(argv=None):
     cli = parser()
     args = cli.parse_args(argv)
-    import neat
+    overrides = {name: getattr(args, name) for name in
+                 ('population', 'episodes', 'max_steps', 'max_nodes', 'max_conns', 'batch_size', 'seed')
+                 if getattr(args, name) is not None}
+    if args.resume and overrides:
+        cli.error('resume restores population, episodes, seed, capacities and step/batch limits')
+    # Respect user-supplied allocator settings; do not reserve most of a gaming GPU.
+    os.environ.setdefault('XLA_PYTHON_CLIENT_PREALLOCATE', 'false')
+    import jax
+    import numpy as np
 
-    if not args.headless and args.workers not in (None, 1):
-        cli.error("multiple/automatic workers require --headless")
-    if args.resume:
-        if any(value is not None for value in (args.seed, args.population, args.episodes, args.max_steps)):
-            cli.error("resume restores seed, population, episodes, and max-steps from the checkpoint")
-        population, settings, best = restore_checkpoint(args.resume)
-        config = population.config
-    else:
-        config = neat.Config(neat.DefaultGenome, neat.DefaultReproduction,
-                             neat.DefaultSpeciesSet, neat.DefaultStagnation, str(args.config.resolve()))
-        if args.population is not None:
-            config.pop_size = args.population
-        if config.pop_size < 2:
-            cli.error("population must be at least 2")
-        run_seed = 42 if args.seed is None else args.seed
-        seed_rng = random.Random(run_seed)
-        settings = {"seed": run_seed, "seeds": tuple(seed_rng.randrange(2**63) for _ in range(args.episodes or 5)),
-                    "max_steps": args.max_steps or 10000}
-        random.seed(run_seed)
-        population = neat.Population(config)
-        best = None
-    if config.genome_config.num_inputs != 5 or config.genome_config.num_outputs != 1:
-        cli.error("Snake requires 5 inputs and 1 output")
-    config.no_fitness_termination = not args.stop_at_target
-    available = getattr(os, "process_cpu_count", os.cpu_count)() or 1
-    workers = 1 if not args.headless else min(args.workers or max(1, available - 1), config.pop_size)
-    output = args.output or Path("runs") / uuid.uuid4().hex[:8]
-    output.mkdir(parents=True, exist_ok=True)
-    if (output / "run.json").exists() and not args.resume:
-        cli.error("output already contains a run; choose a new --output or use --resume")
-    metadata = {**settings, "workers": workers, "population": config.pop_size,
-                "generations_requested": args.generations, "headless": args.headless,
-                "stop_at_target": args.stop_at_target, "resume": str(args.resume) if args.resume else None}
-    (output / "run.json").write_text(json.dumps(metadata, indent=2) + "\n")
-    renderer = None
-    if not args.headless:
-        from rendering import PopulationRenderer
-        renderer = PopulationRenderer(args.fps)
-        renderer.generation = population.generation
-
-    evaluator = PopulationEvaluator(config, settings["seeds"], settings["max_steps"], workers, renderer)
-
-    class RunReporter(neat.reporting.BaseReporter):
-        def __init__(self):
-            self.best = copy.deepcopy(best)
-            if self.best is not None:
-                atomic_pickle(output / "best.pkl", {"genome": self.best, "config": config, "settings": settings})
-
-        def post_evaluate(self, config, genomes, species, generation_best):
-            prepare_checkpoint(population)
-            if self.best is None or generation_best.fitness > self.best.fitness:
-                self.best = copy.deepcopy(generation_best)
-                atomic_pickle(output / "best.pkl", {"genome": self.best, "config": config, "settings": settings})
-            results = evaluator.results
-            episodes = [episode for result in results.values() for episode in result.episodes]
-            steps = sum(episode.steps for episode in episodes)
-            metrics = {"generation": population.generation, "genomes": len(results),
-                       "episodes": len(episodes), "steps": steps, "seconds": evaluator.seconds,
-                       "steps_per_second": steps / max(evaluator.seconds, 1e-9),
-                       "best_fitness": generation_best.fitness,
-                       "mean_fitness": sum(result.fitness for result in results.values()) / len(results),
-                       "mean_score": sum(episode.score for episode in episodes) / len(episodes),
-                       "max_score": max(episode.score for episode in episodes)}
-            with (output / "metrics.jsonl").open("a") as handle:
-                handle.write(json.dumps(metrics) + "\n")
-            print(f"Generation {population.generation}: best={metrics['best_fitness']:.1f} "
-                  f"mean={metrics['mean_fitness']:.1f} score={metrics['mean_score']:.2f} "
-                  f"steps/s={metrics['steps_per_second']:.0f}", flush=True)
-
-        def end_generation(self, config, genomes, species):
-            next_generation = population.generation + 1
-            if args.checkpoint_every and next_generation % args.checkpoint_every == 0:
-                save_checkpoint(output / "checkpoint.pkl.gz", population, settings, self.best, next_generation)
-
-    reporter = RunReporter()
-    population.add_reporter(reporter)
-    print(f"Mode: {'headless' if args.headless else 'visual'}, workers={workers}, "
-          f"population={config.pop_size}, episodes={len(settings['seeds'])}, output={output}", flush=True)
     try:
-        with evaluator:
-            population.run(evaluator.evaluate, args.generations)
-    except KeyboardInterrupt:
-        print("Interrupted; saving the current generation for reevaluation.")
-    finally:
-        save_checkpoint(output / "checkpoint.pkl.gz", population, settings, reporter.best)
-    print(f"Saved artifacts to {output}")
-    return output
+        devices = jax.devices() if args.device == 'auto' else jax.devices(args.device)
+    except RuntimeError as error:
+        cli.error(f'{args.device} device unavailable: {error}. See Requirements-gpu.txt for CUDA installation.')
+    device = devices[0]
+    jax.config.update('jax_compilation_cache_dir', str(Path('runs/.jax-cache').resolve()))
+    with jax.default_device(device):
+        from tensor_backend import TensorBackend
+        try:
+            if args.resume:
+                config, state, best = restore_checkpoint(args.resume)
+                state = jax.device_put(state, device)
+            else:
+                config = replace(load_config(args.config), **overrides).validate()
+                state, best = None, None
+        except (ValueError, TypeError, OSError) as error:
+            cli.error(str(error))
+        output = args.output or Path('runs') / uuid.uuid4().hex[:8]
+        output.mkdir(parents=True, exist_ok=True)
+        if (output / 'run.json').exists() and not args.resume:
+            cli.error('output already contains a run; choose a new --output or use --resume')
+        metadata = {'format': FORMAT, 'revision': TENSORNEAT_REVISION,
+                    'jax_version': jax.__version__, 'config': asdict(config),
+                    'device': str(device), 'platform': device.platform,
+                    'generations_requested': args.generations, 'headless': args.headless,
+                    'stop_at_target': args.stop_at_target,
+                    'resume': str(args.resume) if args.resume else None}
+        (output / 'run.json').write_text(json.dumps(metadata, indent=2) + '\n')
+        backend = TensorBackend(config)
+        if state is None:
+            state = backend.setup()
+        if best is not None:
+            save_best(output / 'best.npz', config, best)
+        renderer = None
+        print(f'TensorNEAT on {device}: population={config.population}, episodes={config.episodes}, '
+              f'batch={config.batch_size or config.population}, output={output}', flush=True)
+        try:
+            print('Compiling evolution and batched simulation...', flush=True)
+            started = time.perf_counter()
+            compiled = backend.compile(state)
+            compile_seconds = time.perf_counter() - started
+            print(f'Compilation ready in {compile_seconds:.2f}s', flush=True)
+            if not args.headless:
+                from rendering import TensorRenderer
+                renderer = TensorRenderer(backend.algorithm, fps=args.fps)
+            for _ in range(args.generations):
+                generation = int(state.generation)
+                started = time.perf_counter()
+                next_state, population, statistics = compiled(state)
+                jax.block_until_ready((next_state, population, statistics))
+                seconds = time.perf_counter() - started
+                state = next_state
+                fitness, scores, maxima, steps = jax.device_get(statistics)
+                if not np.all(np.isfinite(fitness)):
+                    raise RuntimeError('Non-finite population fitness')
+                index = int(np.argmax(fitness))
+                if best is None or float(fitness[index]) > best['fitness']:
+                    nodes, conns = jax.device_get((population[0][index], population[1][index]))
+                    best = {'nodes': nodes, 'conns': conns, 'fitness': float(fitness[index]),
+                            'generation': generation}
+                    save_best(output / 'best.npz', config, best)
+                total_steps = int(np.sum(steps))
+                metrics = {'generation': generation, 'genomes': config.population,
+                           'episodes': config.population * config.episodes,
+                           'steps': total_steps, 'seconds': seconds,
+                           'steps_per_second': total_steps / max(seconds, 1e-9),
+                           'best_fitness': float(np.max(fitness)), 'mean_fitness': float(np.mean(fitness)),
+                           'mean_score': float(np.mean(scores)), 'max_score': int(np.max(maxima)),
+                           'compile_seconds': compile_seconds if _ == 0 else 0.0}
+                with (output / 'metrics.jsonl').open('a') as handle:
+                    handle.write(json.dumps(metrics) + '\n')
+                print(f"Generation {generation}: best={metrics['best_fitness']:.1f} "
+                      f"mean={metrics['mean_fitness']:.1f} score={metrics['mean_score']:.2f} "
+                      f"steps/s={metrics['steps_per_second']:.0f}", flush=True)
+                if args.checkpoint_every and int(state.generation) % args.checkpoint_every == 0:
+                    save_checkpoint(output / 'checkpoint.pkl.gz', config, state, best)
+                if renderer is not None:
+                    renderer.show(state, best, config, generation)
+                if args.stop_at_target and float(np.max(fitness)) >= config.fitness_target:
+                    print('Configured fitness target reached.')
+                    break
+        except KeyboardInterrupt:
+            print('Interrupted; saving the last completed generation.')
+        finally:
+            if renderer is not None:
+                renderer.close()
+            save_checkpoint(output / 'checkpoint.pkl.gz', config, state, best)
+        print(f'Saved artifacts to {output}')
+        return output

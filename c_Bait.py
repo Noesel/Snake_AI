@@ -20,8 +20,8 @@ class Bait:
 
         while not is_free_space:
             free_space_counter = 0
-            x = random.randint(1, (self.screen_width / 10) - 1)
-            y = random.randint(1, (self.screen_height / 10) - 1)
+            x = random.randint(1, (self.screen_width // 10) - 1)
+            y = random.randint(1, (self.screen_height // 10) - 1)
             x *= 10
             y *= 10
             x += self.screen_startpoint_x

@@ -1,127 +1,199 @@
 # Snake AI
 
-Snake mit Pygame und neuronalen Netzen, die mit NEAT trainiert werden.
-Beim Start steuert die KI automatisch 24 Snake-Spiele parallel. Eine manuelle
-Steuerung per Tastatur ist derzeit nicht implementiert.
+Snake mit NEAT: fünf relative Eingaben, eine Entscheidung für Links/Geradeaus/Rechts.
+Training ist mit Anzeige oder ohne Grafik auf mehreren CPU-Kernen möglich.
 
-## Voraussetzungen
+## Installation
 
-- Python 3 mit `pip` und `venv`.
-- Eine grafische Desktop-Umgebung, damit Pygame ein Fenster öffnen kann.
-- Die Abhängigkeiten aus `Requirements.txt`: `pygame-ce==2.5.7` und `neat-python==0.92`.
-
-Pygame CE wird im Code weiterhin als `pygame` importiert. Ein kurzer echter
-NEAT-Trainingslauf wurde mit Python 3.14.8 und diesen Paketversionen unter Linux
-mit SDL-Dummy-Videoausgabe geprüft. Das prüft keinen sichtbaren Fensterstart.
-
-## Installation und Start
-
-Im Projektordner unter Linux/macOS ausführen:
+Python 3 mit `pip` und `venv` wird benötigt. Unter Linux/macOS:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -r Requirements.txt
-python Snake_Game.py
 ```
 
-Unter Windows (PowerShell):
+Unter Windows PowerShell:
 
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r Requirements.txt
-python Snake_Game.py
 ```
 
-Bei späteren Starts genügt es, die virtuelle Umgebung zu aktivieren und
-`python Snake_Game.py` auszuführen. Die Groß-/Kleinschreibung von
-`Requirements.txt` und `Snake_Game.py` beachten.
+Für Training mit Anzeige:
 
-## Was passiert beim Start?
+```bash
+python -m pip install -r Requirements.txt
+```
 
-- Ein Fenster mit 1850 × 1000 Pixeln zeigt 24 Spielfelder.
-- Die Schlangen bewegen sich automatisch. Futter ist grün, der Kopf rot und
-  der Körper weiß.
-- Punkte und die aktuelle Generation werden im Fenster angezeigt.
-  Trainingsstatistiken erscheinen im Terminal.
-- Das Training läuft für höchstens 1000 Generationen und kann beim Erreichen
-  des Fitness-Zielwerts aus `config-feedforward.txt` früher enden.
-- Zum Beenden das Fenster schließen oder im Terminal `Strg+C` drücken.
+Für einen reinen Trainingsrechner ohne Anzeige genügt:
 
-Jeder Start beginnt ein neues Training. Das beste Netz wird im aktuellen Code
-nicht als Datei gespeichert.
+```bash
+python -m pip install -r Requirements-headless.txt
+```
 
-## Aktuelle Trainingsparameter
+Getestete Versionen: Python 3.14.8, `neat-python==0.92`, optional
+`pygame-ce==2.5.7`. Headless Training benötigt kein Pygame und keinen
+SDL-Dummy-Treiber. Pygame CE wird für die Anzeige als `pygame` importiert.
+
+## Start mit Anzeige
+
+```bash
+python Snake_Game.py --generations 100
+```
+
+Die Anzeige zeigt bis zu 24 Spiele gleichzeitig. Größere Populationen werden
+in Gruppen angezeigt; die Populationsgröße ist nicht mehr an 24 gebunden.
+Jedes Genom wird standardmäßig über fünf Episoden bewertet. Die Anzeige läuft
+mit 60 FPS; `--fps 0` hebt die Begrenzung auf. Fenster schließen oder `Strg+C`
+beendet den Lauf und speichert einen Checkpoint.
+
+## Headless und parallel trainieren
+
+Beispiel für einen größeren Lauf:
+
+```bash
+python Snake_Game.py --headless --workers 8 --population 256 --episodes 5 --generations 1000 --seed 42
+```
+
+Ein kurzer Funktionstest:
+
+```bash
+python Snake_Game.py --headless --workers 2 --population 32 --episodes 3 --generations 3
+```
+
+`--workers 1` wertet seriell aus. `--workers 0` oder ein weggelassenes
+`--workers` wählt im Headless-Modus automatisch bis zu einen Prozess pro
+verfügbarem CPU-Kern, abzüglich eines Kerns. Das ist eine Heuristik, keine
+automatische Leistungsoptimierung. Die Zahl wird auf die konfigurierte
+Populationsgröße begrenzt. Mehrere Worker erfordern `--headless`.
+
+Die Worker bleiben über Generationen bestehen. Ein Auftrag umfasst ein Genom
+mit allen Episoden; Konfiguration und Seeds werden nur beim Worker-Start
+übertragen. Der Koordinator sammelt Ergebnisse und führt die Evolution aus.
+Prozesse verwenden `spawn`, damit beim Start keine Fenster oder CUDA-Kontexte
+vererbt werden. Getestet wurde unter Linux; ein Test auf dem Zielrechner mit
+Windows steht noch aus.
+
+Alle Genome und Generationen verwenden denselben Satz Episoden-Seeds.
+Simulationen besitzen eigene Zufallszahlengeneratoren und verändern den
+Zufallszustand der Evolution nicht. Bei gleicher Konfiguration, gleichem Seed
+und derselben Python-/NEAT-Version stimmen serielle und parallele Ergebnisse
+überein. Die Fitness ist der Mittelwert über die Episoden. Feste Trainings-Seeds
+können überangepasst werden; eine separate Bewertung auf neuen Seeds ist ein
+späterer Ausbau.
+
+## Ergebnisse und Fortsetzen
+
+Jeder Lauf legt ein neues Verzeichnis unter `runs/` an. Mit
+`--output runs/mein-lauf` lässt sich ein eigenes Verzeichnis wählen.
+
+| Datei | Inhalt |
+| --- | --- |
+| `best.pkl` | Bisher bestes Genom mit NEAT-Konfiguration und Auswertungseinstellungen |
+| `checkpoint.pkl.gz` | Population, Arten, Zähler, Zufallszustand und Einstellungen zum Fortsetzen |
+| `metrics.jsonl` | Pro Generation Fitness, Punkte, Schritte und Auswertungsdurchsatz |
+| `run.json` | Einstellungen des gestarteten Laufs |
+
+Das beste Genom wird bei Verbesserung gespeichert. Checkpoints werden alle
+zehn Generationen und am Laufende gespeichert. `--checkpoint-every 1` speichert
+nach jeder Generation; `--checkpoint-every 0` nur am Ende. Dateien werden über
+eine temporäre Datei ersetzt. Bei `Strg+C` kann die zuletzt begonnene Generation
+beim Fortsetzen erneut ausgewertet werden.
+
+```bash
+python Snake_Game.py --headless --workers 8 --resume runs/mein-lauf/checkpoint.pkl.gz --generations 1000
+```
+
+Das startet bis zu 1000 **weitere** Generationen. Ohne `--output` entsteht ein
+neues Ergebnisverzeichnis. Seed, Populationsgröße, Episoden und Schrittlänge
+werden aus dem Checkpoint übernommen. Worker-Zahl und Anzeigemodus lassen sich
+ändern. Das Dateiformat gehört zu diesem Trainer, nicht zu NEATs eingebautem
+Checkpointer; dieselbe Python-/NEAT-Version wird vorausgesetzt.
+
+## Trainingsparameter
 
 | Parameter | Einstellung und Wirkung |
 | --- | --- |
-| Eingänge / Ausgänge | `5` Eingänge, `1` Ausgang für Links/Geradeaus/Rechts |
-| Aktivierung | `tanh`; Ausgang über `0.5`: rechts, unter `-0.5`: links, sonst geradeaus |
-| Population | `24`, passend zu den derzeit fest angelegten 24 Spielfeldern |
+| Ein-/Ausgänge | `5` Eingänge, `1` Ausgang mit `tanh` |
+| Aktion | Ausgang über `0.5`: rechts, unter `-0.5`: links, sonst geradeaus |
+| Population | Standard `24`; über `--population` frei einstellbar, mindestens `2` |
+| Episoden | Standard `5`; Fitness wird gemittelt |
 | Energie | Anfangs `20` Züge, pro Futter zusätzlich `20` |
-| Fitness | `+100` pro Futter, `-10` beim Spielende |
-| Fitnessziel | `10000`; wegen des Abzugs beim Spielende sind mindestens 101 Futterstücke nötig |
-| Generationslimit | `1000`; das Fitnessziel kann das Training deutlich früher beenden |
-| Stagnation | `max_stagnation = 1000`; innerhalb des Generationslimits werden stagnierende Arten praktisch nicht aussortiert |
+| Fitness pro Episode | `+100` pro Futter, `-10` am Episodenende, auch beim Schrittlimit |
+| Schrittlimit | Standard `10000` pro Episode, einstellbar mit `--max-steps` |
+| Generationen | Standard `1000`; die angeforderte Zahl wird regulär durchlaufen |
+| Früher Abbruch | Nur mit `--stop-at-target`; verwendet das Fitnessziel `10000` aus der Konfiguration |
+| Stagnation | `max_stagnation = 1000` bleibt unverändert und sortiert innerhalb eines Laufs mit 1000 Generationen praktisch keine Arten aus |
 
-Beim früheren Fitnessziel `1000` wurde das Ziel in zehn kurzen Zufallsstarts
-jeweils nach 1–5 Generationen erreicht. Das aktuelle Ziel ist höher; diese
-kurzen Tests belegen noch keine zuverlässig gute Strategie auf neuen
-Futterfolgen.
+Die Zählung im Terminal beginnt bei Generation `0`. Ein vollständig belegtes
+Spielfeld beendet die Episode; die Futterplatzierung kann nicht endlos suchen.
+Eine manuelle Tastatursteuerung ist nicht eingebaut.
 
-## Eingaben der KI
+## KI-Eingaben
 
-Das Netz erhält fünf Eingaben in dieser Reihenfolge:
+| Reihenfolge | Information | Werte |
+| --- | --- | --- |
+| 1 | Gefahr vorne: Wand oder Körper beim nächsten Zug | `0` oder `1` |
+| 2 | Gefahr nach Linksdrehung | `0` oder `1` |
+| 3 | Gefahr nach Rechtsdrehung | `0` oder `1` |
+| 4 | Futter vor/hinter der Schlange | `1`: vorne, `-1`: hinten, `0`: seitlich |
+| 5 | Futter rechts/links der Schlange | `1`: rechts, `-1`: links, `0`: auf der Blickachse |
 
-| Eingabe | Werte und Bedeutung |
-| --- | --- |
-| Gefahr vorne | `1`: Der nächste Schritt trifft eine Wand oder den Körper; sonst `0` |
-| Gefahr links | Gleiche Prüfung nach einer Linksdrehung |
-| Gefahr rechts | Gleiche Prüfung nach einer Rechtsdrehung |
-| Futter vor/hinter der Schlange | `1`: vorne, `-1`: hinten, `0`: seitlich auf gleicher Höhe |
-| Futter rechts/links der Schlange | `1`: rechts, `-1`: links, `0`: auf der Blickachse |
+Die Entscheidung erfolgt vor jedem Zug, einschließlich des ersten. Die
+Schwanzzelle gilt als frei, wenn sie im nächsten Zug verlassen wird. Neues
+Futter wird nach dem Wachstum platziert und liegt nicht im Körper.
 
-Alle Richtungen beziehen sich auf die aktuelle Blickrichtung der Schlange.
-Die Futtereingaben beschreiben die Richtung, nicht die Entfernung. Das Netz
-entscheidet vor jedem Schritt, auch vor dem ersten, ob die Schlange geradeaus
-läuft, links oder rechts abbiegt. Die NEAT-Konfiguration verwendet dafür
-`num_inputs = 5`.
+## Effizienz und RTX 5090
 
-## Hinweise bei Startproblemen
+Dieses Backend nutzt **CPU-Prozesse**, kein CUDA. NEAT 0.92 wertet kleine Netze
+mit veränderlicher Topologie in Python aus. Eine RTX 5090 beschleunigt diesen
+Code daher nicht automatisch. Ein zukünftiges GPU-Backend müsste viele
+Simulationen und Netzberechnungen gebündelt auf der GPU durchführen und häufige
+Übertragungen pro Zug vermeiden. Die getrennte Auswertung bietet dafür einen
+klaren Austauschpunkt; das Backend ist hier noch nicht implementiert.
 
-- **`ModuleNotFoundError` für `pygame` oder `neat`:** Die virtuelle Umgebung
-  aktivieren und `python -m pip install -r Requirements.txt` darin ausführen.
-- **Installation von Pygame schlägt fehl:** Die aktuelle `Requirements.txt`
-  verwenden. Sie enthält Pygame CE anstelle der früher festgelegten
-  Pygame-Version `2.0.1`.
-- **Kein Fenster / Fehler zur Videoausgabe:** Das Programm in einer grafischen
-  Desktop-Sitzung starten.
+Die festgelegte NEAT-Version `0.92` von 2017 bleibt hier die getestete
+CPU-Vergleichsbasis. Aktuell auf [PyPI](https://pypi.org/project/neat-python/)
+ist `2.0.0` vom März 2026. Ein Upgrade ist eine eigene Migration; alte
+Checkpoints sind laut [Changelog](https://github.com/CodeReclaimers/neat-python/blob/master/CHANGELOG.md)
+nicht mit Versionen ab 1.0 kompatibel. Für GPU-NEAT ist
+[TensorNEAT](https://github.com/EMI-Group/tensorneat) mit JAX ein Kandidat;
+[EvoTorch](https://github.com/nnaisense/evotorch) bietet andere
+Evolutionsverfahren mit PyTorch. Keines davon wurde auf der Zielhardware
+dieses Projekts gemessen.
 
-## Regressionstests
+Für den aktuellen Stand Worker-Zahlen wie `1`, `2`, `4` und `8` mit identischen
+Seeds, Populationen und Episodenzahlen vergleichen. `metrics.jsonl` enthält
+den Durchsatz; die erste Generation enthält auch den Prozessstart. Kleine
+Populationen und kurze Episoden können durch Prozesskommunikation langsamer
+werden. Größere Populationen verändern zudem die Evolution und sind kein
+reiner Geschwindigkeitsschalter.
+
+Ein erster Benchmark ist in [docs/performance.md](docs/performance.md)
+dokumentiert. Er ist keine Messung auf der RTX 5090 oder dem Zielrechner.
+
+## Tests
 
 ```bash
-python3 -B -m unittest discover -s tests -v
+python -B -m unittest discover -s tests -v
 ```
 
-Die Tests benötigen keine zusätzlichen Pakete. Pygame und NEAT werden für die
-Logiktests durch Test-Doubles ersetzt; sie prüfen keine Grafik oder tatsächliche
-NEAT-Evolution. Geprüft werden Futterplatzierung, Richtungswechsel,
-Wandabstände, die fünf KI-Eingaben und das Entfernen beendeter Spiele inklusive
-Fitness-Zuordnung.
+Die Logiktests benötigen keine zusätzlichen Pakete. Mit installiertem
+`neat-python` kommen Integrationstests für serielle/parallele Gleichheit und
+Checkpoint-Wiederaufnahme hinzu. Mit Pygame wird auch die Gleichheit zwischen
+Anzeige und Headless-Modus mit SDL-Dummy-Ausgabe geprüft. Die Logiktests
+verwenden die echte Simulation ohne Grafik-Mocks.
 
-Die weiterhin separat getestete Wandabstandsfunktion beschreibt die Strecke
-bis zur letzten sicheren Zelle in Blickrichtung, links und rechts. Sie wird
-nicht mehr als KI-Eingabe verwendet.
-
-## Projektdateien
+## Dateien
 
 | Datei | Aufgabe |
 | --- | --- |
-| `Snake_Game.py` | Einstiegspunkt, NEAT-Training und Verwaltung der 24 Spiele |
-| `c_Game.py` | Spiellogik, Punkte und Eingaben für das neuronale Netz |
-| `c_Snake.py` | Bewegung, Wachstum, Energie und Kollisionen der Schlange |
-| `c_Bait.py` | Platzierung und Darstellung des Futters |
-| `c_Playboard.py` | Darstellung des Spielfelds |
-| `config-feedforward.txt` | NEAT-Konfiguration, unter anderem Population und Fitness-Ziel |
-| `Requirements.txt` | Festgelegte Python-Abhängigkeiten |
+| `Snake_Game.py` | Einstiegspunkt und CLI-Aufruf |
+| `training.py` | Evolution, Optionen, Metriken und Checkpoints |
+| `evaluation.py` | Episoden, Fitness und dauerhafter CPU-Prozesspool |
+| `rendering.py` | Optionale Pygame-Anzeige |
+| `c_Game.py` | Gemeinsame Simulation und Beobachtungen |
+| `c_Snake.py`, `c_Bait.py`, `c_Playboard.py` | Schlange, Futter und Darstellung |
+| `config-feedforward.txt` | NEAT-Parameter |
+| `Requirements-headless.txt` | Abhängigkeit für Training ohne Anzeige |
+| `Requirements.txt` | Abhängigkeiten einschließlich Anzeige |

@@ -56,24 +56,16 @@ class Game:
         self.draw_game(self.win)
 
     def calc_border_distance(self):
-        if self.snake.direction == 'up':
-            dir_forward = abs(self.start_point_y + self.move_distance - self.snake.y_head_pos)
-            dir_left = abs(self.start_point_x + self.move_distance - self.snake.x_head_pos)
-            dir_right = abs(self.end_point_x - self.move_distance - self.snake.x_head_pos)
-        elif self.snake.direction == 'down':
-            dir_forward = abs(self.end_point_y + self.offset - self.move_distance - self.snake.y_head_pos)
-            dir_left = abs(self.end_point_x - self.move_distance - self.snake.x_head_pos)
-            dir_right = abs(self.start_point_x + self.move_distance - self.snake.x_head_pos)
-        elif self.snake.direction == 'left':
-            dir_forward = abs(self.start_point_x + self.move_distance - self.snake.x_head_pos)
-            dir_left = abs(self.end_point_y + self.offset - self.move_distance - self.snake.y_head_pos)
-            dir_right = abs(self.start_point_y + self.offset + self.move_distance - self.snake.y_head_pos)
-        else:
-            dir_forward = abs(self.end_point_x - self.move_distance - self.snake.x_head_pos)
-            dir_left = abs(self.start_point_y + self.move_distance + self.offset - self.snake.y_head_pos)
-            dir_right = abs(self.end_point_y + self.offset - self.move_distance - self.snake.y_head_pos)
-
-        return dir_forward, dir_left, dir_right
+        """Return distances to the last safe cells ahead, left, and right."""
+        distances = {
+            0: max(0, self.snake.y_head_pos - (self.start_point_y + self.offset + self.move_distance)),
+            90: max(0, self.end_point_x - self.move_distance - self.snake.x_head_pos),
+            180: max(0, self.end_point_y + self.offset - self.move_distance - self.snake.y_head_pos),
+            270: max(0, self.snake.x_head_pos - (self.start_point_x + self.move_distance)),
+        }
+        direction = self.snake.direction
+        return (distances[direction], distances[(direction - 90) % 360],
+                distances[(direction + 90) % 360])
 
     def distance_to_bait(self, bait_x, bait_y, snake_x, snake_y):
         erg = math.sqrt(math.pow(bait_x - snake_x, 2) + math.pow(bait_y - snake_y, 2))

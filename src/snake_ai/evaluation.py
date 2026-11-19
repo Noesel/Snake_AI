@@ -70,7 +70,6 @@ def evaluate(
     max_steps = min(settings.max_steps, env_settings.max_episode_steps)
     return EvaluationSummary(
         tuple(
-            play_episode(policy, game, encoder, seed, max_steps)
-            for seed in settings.game_seeds()
+            play_episode(policy, game, encoder, seed, max_steps) for seed in settings.game_seeds()
         )
     )

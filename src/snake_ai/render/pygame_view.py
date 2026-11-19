@@ -17,21 +17,27 @@ BODY_NEAR = (255, 255, 255)
 BODY_FAR = (110, 110, 110)
 FOOD = (40, 200, 70)
 TEXT = (235, 235, 235)
+MUTED = (160, 160, 160)
+HIGHLIGHT = (240, 190, 40)
 
-HEADER_HEIGHT = 48
+LINE_HEIGHT = 22
+HEADER_HEIGHT = 3 * LINE_HEIGHT
+FOOTER_HEIGHT = LINE_HEIGHT + 6
 MARGIN = 12
 
 
 @dataclass(frozen=True)
 class Panel:
-    """What one board shows: a state plus a title line above it."""
+    """What one board shows: a state plus up to two text lines above it."""
 
     state: GameState
     title: str = ""
+    subtitle: str = ""
+    highlight: bool = False
 
 
 class BoardRenderer:
-    """Draw a single board with a two-line header at a given position."""
+    """Draw a single board with a three-line header at a given position."""
 
     def __init__(self, cell_size: int, font: pygame.font.Font) -> None:
         self._cell = cell_size
@@ -44,14 +50,17 @@ class BoardRenderer:
         state, cell = panel.state, self._cell
         left, top = origin
         board_top = top + HEADER_HEIGHT
-        self._text(surface, panel.title, (left, top))
-        status = f"Score {state.score}   Energy {state.energy}   Steps {state.steps}"
+        self.text(surface, panel.title, (left, top))
+        self.text(surface, panel.subtitle, (left, top + LINE_HEIGHT), MUTED)
+        status = f"Score {state.score}  Energy {state.energy}  Steps {state.steps}"
         if state.end_reason is not None:
-            status += f"   END: {state.end_reason.value}"
-        self._text(surface, status, (left, top + HEADER_HEIGHT // 2))
+            status += f"  END {state.end_reason.value}"
+        self.text(surface, status, (left, top + 2 * LINE_HEIGHT))
 
         board = pygame.Rect(left, board_top, state.width * cell, state.height * cell)
         pygame.draw.rect(surface, BOARD, board)
+        if panel.highlight:
+            pygame.draw.rect(surface, HIGHLIGHT, board.inflate(6, 6), width=3)
         for column in range(1, state.width):
             x = left + column * cell
             pygame.draw.line(surface, GRID, (x, board_top), (x, board.bottom - 1))
@@ -77,16 +86,35 @@ class BoardRenderer:
             top + row * self._cell + self._cell // 2,
         )
 
-    def _text(self, surface: pygame.Surface, text: str, position: tuple[int, int]) -> None:
-        surface.blit(self._font.render(text, True, TEXT), position)
+    def text(
+        self,
+        surface: pygame.Surface,
+        text: str,
+        position: tuple[int, int],
+        color: tuple[int, int, int] = TEXT,
+    ) -> None:
+        if text:
+            surface.blit(self._font.render(text, True, color), position)
 
 
 class GameWindow:
-    """A pygame window that shows several boards side by side."""
+    """A pygame window that shows several boards side by side.
 
-    def __init__(self, caption: str, boards: int, board_size: tuple[int, int], cell_size: int):
+    With ``footer=True`` a text line below the boards shows ``show(footer=...)``.
+    """
+
+    def __init__(
+        self,
+        caption: str,
+        boards: int,
+        board_size: tuple[int, int],
+        cell_size: int,
+        *,
+        footer: bool = False,
+    ):
         self._caption = caption
         self._boards = boards
+        self._footer = footer
         self._cell = cell_size
         width, height = board_size
         self._board_pixels = width * cell_size, HEADER_HEIGHT + height * cell_size
@@ -99,7 +127,7 @@ class GameWindow:
         board_width, board_height = self._board_pixels
         size = (
             MARGIN + self._boards * (board_width + MARGIN),
-            MARGIN * 2 + board_height,
+            MARGIN * 2 + board_height + (FOOTER_HEIGHT if self._footer else 0),
         )
         self._surface = pygame.display.set_mode(size)
         pygame.display.set_caption(self._caption)
@@ -115,7 +143,7 @@ class GameWindow:
     ) -> None:
         pygame.quit()
 
-    def show(self, panels: Sequence[Panel], fps: int) -> None:
+    def show(self, panels: Sequence[Panel], fps: int, footer: str = "") -> None:
         """Draw all panels and wait for the next frame; ``fps=0`` means no limit."""
         if self._surface is None or self._renderer is None or self._clock is None:
             raise RuntimeError("use GameWindow as a context manager")
@@ -125,6 +153,9 @@ class GameWindow:
             self._renderer.draw(
                 self._surface, panel, (MARGIN + index * (board_width + MARGIN), MARGIN)
             )
+        if self._footer:
+            top = MARGIN + self._board_pixels[1] + FOOTER_HEIGHT - LINE_HEIGHT
+            self._renderer.text(self._surface, footer, (MARGIN, top), MUTED)
         pygame.display.flip()
         if fps:
             self._clock.tick(fps)

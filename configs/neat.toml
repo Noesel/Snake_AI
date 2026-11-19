@@ -1,0 +1,13 @@
+# NEAT with neat-python; genome and evolution settings live in neat.ini.
+
+[env]
+local_awareness = false
+max_episode_steps = 10000
+
+[train]
+neat_config = "configs/neat.ini"
+generations = 300
+episodes = 5             # training games per genome, new seeds every generation
+seed = 0
+snapshot_every = 25      # generations
+workers = 24             # processes; part of the 80 % CPU budget

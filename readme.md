@@ -9,6 +9,8 @@
 > uv sync                    # Python 3.14, Abhängigkeiten aus pyproject.toml
 > uv run pytest              # Regeltests des neuen Kerns
 > uv run ruff check .
+> uv sync --extra render     # zusätzlich pygame-ce für Fenster
+> uv run snake-ai play       # manuell spielen: Pfeiltasten/A-D, R neu, Esc
 > ```
 >
 > Spielregeln: `configs/game.toml`. Planung und Entscheidungen liegen im

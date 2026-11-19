@@ -5,7 +5,16 @@ description = "Shared Snake simulation for comparing NEAT, REINFORCE, A2C, A3C a
 readme = "readme.md"
 requires-python = ">=3.14"
 dependencies = [
+    "gymnasium>=1.4,<2",
     "numpy>=2.5,<3",
+]
+
+[project.scripts]
+snake-ai = "snake_ai.cli:main"
+
+[project.optional-dependencies]
+render = [
+    "pygame-ce>=2.5.8,<3",
 ]
 
 [dependency-groups]

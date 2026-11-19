@@ -65,7 +65,9 @@ class SnakeGame:
     def reset_to(self, state: GameState, seed: int) -> GameState:
         """Start from an explicit state, e.g. a test scenario.
 
-        If ``state.food`` is ``None`` a new food cell is drawn from ``seed``.
+        Body, food, heading and energy are taken over; score and step count
+        restart at 0. If ``state.food`` is ``None`` a new food cell is drawn
+        from ``seed``.
         """
         if (state.width, state.height) != (self._config.width, self._config.height):
             raise ValueError("state board size differs from the game config")

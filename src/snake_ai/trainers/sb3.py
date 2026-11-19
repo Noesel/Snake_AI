@@ -1,7 +1,5 @@
 """A2C and PPO through Stable-Baselines3 on the Gymnasium adapter."""
 
-import logging
-import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -16,15 +14,12 @@ from stable_baselines3.common.env_util import make_vec_env
 
 from snake_ai.core import Action, GameConfig, Observation
 from snake_ai.envs import SnakeEnv
-from snake_ai.evaluation import evaluate
-from snake_ai.runs import RunDirectory, SnapshotMeta, environment_versions
+from snake_ai.runs import RunDirectory, SnapshotMeta, SnapshotRecorder
 from snake_ai.settings import EnvSettings, EvaluationSettings, from_table, load_toml
 
 ALGORITHMS: dict[str, type[BaseAlgorithm]] = {"ppo": PPO, "a2c": A2C}
 MODEL_FILE = "model.zip"
 UNIT = "env_steps"
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,18 +69,16 @@ class Sb3Trainer:
     def train(self) -> None:
         settings = self._settings
         torch.set_num_threads(settings.torch_threads)
-        self._run.write_json(
-            "config.json",
-            {
-                "method": settings.algorithm,
-                "game": asdict(self._game_config),
-                "env": asdict(self._env_settings),
-                "train": asdict(settings),
-                "evaluation": asdict(self._evaluation),
-            },
+        recorder = SnapshotRecorder(
+            self._run,
+            method=settings.algorithm,
+            unit=UNIT,
+            seed=settings.seed,
+            game_config=self._game_config,
+            env_settings=self._env_settings,
+            evaluation=self._evaluation,
         )
-        self._run.write_json("versions.json", environment_versions())
-
+        recorder.write_run_files(asdict(settings))
         env = make_vec_env(
             lambda: SnakeEnv(
                 self._game_config,
@@ -95,8 +88,7 @@ class Sb3Trainer:
             n_envs=settings.n_envs,
             seed=settings.seed,
         )
-        algorithm = ALGORITHMS[settings.algorithm]
-        model = algorithm(
+        model = ALGORITHMS[settings.algorithm](
             "MlpPolicy",
             env,
             seed=settings.seed,
@@ -104,66 +96,36 @@ class Sb3Trainer:
             verbose=0,
             **settings.hyperparameters,
         )
-        started = time.perf_counter()
-        callback = _SnapshotCallback(self.save_snapshot, settings.snapshot_every, started)
-        self.save_snapshot(model, 0, started)
+
+        def snapshot(progress: int) -> None:
+            episodes = list(model.ep_info_buffer or [])
+            recorder.record(
+                progress,
+                Sb3Policy(model),
+                lambda directory: model.save(directory / MODEL_FILE),
+                train_episode_reward=_mean(info["r"] for info in episodes),
+                train_episode_length=_mean(info["l"] for info in episodes),
+            )
+
+        callback = _SnapshotCallback(snapshot, settings.snapshot_every)
+        snapshot(0)
         model.learn(settings.total_timesteps, callback=callback)
         if model.num_timesteps != callback.last_snapshot:
-            self.save_snapshot(model, model.num_timesteps, started)
+            snapshot(model.num_timesteps)
         env.close()
-
-    def save_snapshot(self, model: BaseAlgorithm, progress: int, started: float) -> None:
-        directory = self._run.snapshot_dir(progress, UNIT)
-        model.save(directory / MODEL_FILE)
-        SnapshotMeta.describe(
-            method=self._settings.algorithm,
-            run=self._run.name,
-            progress=progress,
-            unit=UNIT,
-            seed=self._settings.seed,
-            game_config=self._game_config,
-            local_awareness=self._env_settings.local_awareness,
-        ).save(directory)
-
-        summary = evaluate(
-            Sb3Policy(model), self._game_config, self._env_settings, self._evaluation
-        )
-        elapsed = time.perf_counter() - started
-        episodes = list(model.ep_info_buffer or [])
-        record = {
-            "progress": progress,
-            "unit": UNIT,
-            "wall_seconds": round(elapsed, 2),
-            "train_episode_reward": _mean(info["r"] for info in episodes),
-            "train_episode_length": _mean(info["l"] for info in episodes),
-            "evaluation": summary.to_dict(),
-        }
-        self._run.append_metrics(record)
-        logger.info(
-            "%s %d: eval mean score %.2f, max %d, win rate %.2f, ends %s",
-            UNIT,
-            progress,
-            summary.mean_score,
-            record["evaluation"]["max_score"],
-            summary.win_rate,
-            record["evaluation"]["end_reasons"],
-        )
 
 
 class _SnapshotCallback(BaseCallback):
-    def __init__(
-        self, save: Callable[[BaseAlgorithm, int, float], None], every: int, started: float
-    ) -> None:
+    def __init__(self, snapshot: Callable[[int], None], every: int) -> None:
         super().__init__()
-        self._save = save
+        self._snapshot = snapshot
         self._every = every
-        self._started = started
         self.last_snapshot = 0
 
     def _on_step(self) -> bool:
         if self.num_timesteps - self.last_snapshot >= self._every:
             self.last_snapshot = self.num_timesteps
-            self._save(self.model, self.num_timesteps, self._started)
+            self._snapshot(self.num_timesteps)
         return True
 
 

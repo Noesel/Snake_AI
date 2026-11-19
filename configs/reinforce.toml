@@ -1,0 +1,16 @@
+# REINFORCE in plain PyTorch: complete episodes, Monte-Carlo returns.
+
+[env]
+local_awareness = false
+max_episode_steps = 10000
+
+[train]
+total_timesteps = 3000000
+episodes_per_update = 16
+seed = 0
+snapshot_every = 500000  # environment steps
+torch_threads = 4        # part of the 80 % CPU budget
+learning_rate = 0.001
+gamma = 0.99
+entropy_coef = 0.01
+hidden_sizes = [64, 64]

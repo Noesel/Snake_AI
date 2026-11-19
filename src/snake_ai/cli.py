@@ -1,17 +1,23 @@
 """Command line entry point and composition root."""
 
 import argparse
+import importlib
 import logging
 from collections.abc import Sequence
 from pathlib import Path
 
 from snake_ai.core import Action, GameConfig, SnakeGame
 from snake_ai.policies import Policy
-from snake_ai.runs import SnapshotMeta
+from snake_ai.runs import RunDirectory, SnapshotMeta
 from snake_ai.settings import EnvSettings, EvaluationSettings, from_table, load_toml
 
 CONFIGS = Path("configs")
-SB3_METHODS = ("ppo", "a2c")
+# Each module provides ``load_policy(directory, game_config)``.
+TRAINER_MODULES = {
+    "ppo": "snake_ai.trainers.sb3",
+    "a2c": "snake_ai.trainers.sb3",
+    "reinforce": "snake_ai.trainers.reinforce",
+}
 
 logger = logging.getLogger("snake_ai")
 
@@ -29,7 +35,7 @@ def _parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(required=True)
 
     train = commands.add_parser("train", help="train one method headless")
-    train.add_argument("method", choices=SB3_METHODS)
+    train.add_argument("method", choices=sorted(TRAINER_MODULES))
     train.add_argument("--config", type=Path, help="method config (default: configs/<method>.toml)")
     train.add_argument("--runs", type=Path, default=Path("runs"))
     train.set_defaults(handler=_train)
@@ -54,16 +60,30 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _train(args: argparse.Namespace) -> None:
-    from snake_ai.runs import RunDirectory
+    config_path = args.config or CONFIGS / f"{args.method}.toml"
+    game_config = GameConfig.load(args.game_config)
+    evaluation = _evaluation_settings(args)
+    if args.method == "reinforce":
+        from snake_ai.trainers.reinforce import ReinforceSettings, ReinforceTrainer
+
+        settings, env_settings = ReinforceSettings.load(config_path)
+        run = _create_run(args)
+        ReinforceTrainer(settings, env_settings, game_config, evaluation, run).train()
+        return
+
     from snake_ai.trainers.sb3 import Sb3Settings, Sb3Trainer
 
-    settings, env_settings = Sb3Settings.load(args.config or CONFIGS / f"{args.method}.toml")
-    if settings.algorithm != args.method:
-        raise SystemExit(f"config is for {settings.algorithm}, not {args.method}")
+    sb3_settings, env_settings = Sb3Settings.load(config_path)
+    if sb3_settings.algorithm != args.method:
+        raise SystemExit(f"config is for {sb3_settings.algorithm}, not {args.method}")
+    run = _create_run(args)
+    Sb3Trainer(sb3_settings, env_settings, game_config, evaluation, run).train()
+
+
+def _create_run(args: argparse.Namespace) -> RunDirectory:
     run = RunDirectory.create(args.runs, args.method)
     logger.info("run directory %s", run.path)
-    game_config = GameConfig.load(args.game_config)
-    Sb3Trainer(settings, env_settings, game_config, _evaluation_settings(args), run).train()
+    return run
 
 
 def _evaluate(args: argparse.Namespace) -> None:
@@ -143,12 +163,11 @@ def _play(args: argparse.Namespace) -> None:
 
 def _load_policy(snapshot: Path, game_config: GameConfig) -> tuple[Policy, SnapshotMeta]:
     method = SnapshotMeta.load(snapshot).method
-    if method not in SB3_METHODS:
+    if method not in TRAINER_MODULES:
         raise SystemExit(f"no loader for method {method!r}")
-    from snake_ai.trainers.sb3 import load_policy
-
+    module = importlib.import_module(TRAINER_MODULES[method])
     try:
-        return load_policy(snapshot, game_config)
+        return module.load_policy(snapshot, game_config)
     except ValueError as error:
         raise SystemExit(str(error)) from error
 

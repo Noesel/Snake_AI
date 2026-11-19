@@ -18,6 +18,7 @@ TRAINER_MODULES = {
     "a2c": "snake_ai.trainers.sb3",
     "reinforce": "snake_ai.trainers.reinforce",
     "neat": "snake_ai.trainers.neat_trainer",
+    "a3c": "snake_ai.trainers.a3c",
 }
 
 logger = logging.getLogger("snake_ai")
@@ -64,6 +65,12 @@ def _train(args: argparse.Namespace) -> None:
     config_path = args.config or CONFIGS / f"{args.method}.toml"
     game_config = GameConfig.load(args.game_config)
     evaluation = _evaluation_settings(args)
+    if args.method == "a3c":
+        from snake_ai.trainers.a3c import A3cSettings, A3cTrainer
+
+        a3c_settings, env_settings = A3cSettings.load(config_path)
+        A3cTrainer(a3c_settings, env_settings, game_config, evaluation, _create_run(args)).train()
+        return
     if args.method == "neat":
         from snake_ai.trainers.neat_trainer import NeatSettings, NeatTrainer
 

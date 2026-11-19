@@ -48,3 +48,30 @@ def test_neat_short_run_saves_loadable_snapshots(tmp_path: Path) -> None:
     assert meta.unit == "generations"
     first = evaluate(policy, GameConfig(), env, evaluation)
     assert first == evaluate(policy, GameConfig(), env, evaluation)
+
+
+def test_a3c_workers_update_shared_model(tmp_path: Path) -> None:
+    """Gradients and optimizer state from every worker reach the shared model."""
+    from snake_ai.trainers import a3c
+
+    evaluation = EvaluationSettings(episodes=2, max_steps=50)
+    for workers in (1, 3):
+        settings = a3c.A3cSettings(
+            total_timesteps=600, workers=workers, snapshot_every=10_000, n_steps=10
+        )
+        run = RunDirectory.create(tmp_path / str(workers), "a3c")
+        trainer = a3c.A3cTrainer(settings, EnvSettings(), GameConfig(), evaluation, run)
+        trainer.train()
+
+        # One shared Adam step per worker update, from all processes.
+        assert trainer.final_updates >= 600 // 10
+        assert trainer.final_optimizer_steps == trainer.final_updates
+        first, last = sorted((run.path / "snapshots").iterdir())
+        initial, _ = a3c.load_policy(first, GameConfig())
+        trained, meta = a3c.load_policy(last, GameConfig())
+        assert meta.progress >= 600
+        initial_weights = initial._network.state_dict()
+        trained_weights = trained._network.state_dict()
+        assert any(
+            not initial_weights[name].equal(trained_weights[name]) for name in initial_weights
+        )

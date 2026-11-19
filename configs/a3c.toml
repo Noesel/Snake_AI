@@ -1,0 +1,18 @@
+# A3C: asynchronous workers update one shared actor-critic network.
+
+[env]
+local_awareness = false
+max_episode_steps = 10000
+
+[train]
+total_timesteps = 3000000
+workers = 16             # one process and one torch thread each; 80 % CPU budget
+seed = 0
+snapshot_every = 500000  # environment steps
+learning_rate = 0.0005
+gamma = 0.99
+n_steps = 20
+entropy_coef = 0.01
+value_coef = 0.5
+max_grad_norm = 0.5
+hidden_sizes = [64, 64]

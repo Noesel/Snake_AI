@@ -1,5 +1,19 @@
 # CPU benchmark
 
+## All five trainers (2026-11-19)
+
+Default configs, one run each (seed 0), target desktop, CPU only. Evaluation:
+mean score on the 20 fixed games of `configs/evaluation.toml`. Single runs,
+no statistical claims.
+
+| Method | Budget | Parallelism | Wall time | Throughput | Final eval mean (max) |
+| --- | --- | --- | ---: | ---: | ---: |
+| PPO (SB3) | 3 M env steps | 8 envs, 4 torch threads | 139 s | ~21 600 steps/s | 8.50 (24) |
+| A2C (SB3) | 3 M env steps | 16 envs, 4 torch threads | 86 s | ~35 000 steps/s | 9.65 (21) |
+| REINFORCE | 3 M env steps | 16 episodes in lockstep, 4 threads | 138 s | ~21 700 steps/s | 6.05 (11) |
+| A3C | 3 M env steps | 16 worker processes, 1 thread each | 103 s | ~29 600 steps/s | 3.55 (9), unstable |
+| NEAT | 300 generations x 256 genomes x 5 games | 24 worker processes | 132 s | ~0.44 s/generation | 6.00 (12) |
+
 ## Shared simulation core (2026-11-19)
 
 `snake_ai.core.SnakeGame` on the target desktop, Python 3.14.10, numpy 2.5,

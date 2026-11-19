@@ -16,6 +16,12 @@ reached about 3 300 steps/s on CartPole on this machine, so the simulation is
 not the bottleneck for RL training. No optimization planned until a trainer
 measurement says otherwise.
 
+## PPO training throughput (2026-11-19)
+
+`snake-ai train ppo` with `configs/ppo.toml` (8 environments in one process,
+4 torch threads, CPU, MLP policy), 3 000 000 steps including 13 snapshot
+evaluations: 139 s wall time, about 21 600 environment steps/s.
+
 ## Target desktop baseline (2026-11-19)
 
 Measured on the target desktop: Intel Core i9-14900KF (24 cores / 32 logical

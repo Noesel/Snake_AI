@@ -1,5 +1,21 @@
 # CPU benchmark
 
+## Shared simulation core (2026-11-19)
+
+`snake_ai.core.SnakeGame` on the target desktop, Python 3.14.10, numpy 2.5,
+10 x 10 board, uniformly random actions (short episodes, resets included),
+single process, best of three runs of 300 000 steps:
+
+| Work per step | Steps/s |
+| --- | ---: |
+| `step()` only | 805 791 |
+| `step()` + `ObservationEncoder.encode()` (107 values) | 307 810 |
+
+Encoding costs more than the rules. For comparison, SB3 PPO with a small MLP
+reached about 3 300 steps/s on CartPole on this machine, so the simulation is
+not the bottleneck for RL training. No optimization planned until a trainer
+measurement says otherwise.
+
 ## Target desktop baseline (2026-11-19)
 
 Measured on the target desktop: Intel Core i9-14900KF (24 cores / 32 logical

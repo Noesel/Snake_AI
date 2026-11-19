@@ -1,5 +1,19 @@
 # Snake AI
 
+> **Umbau läuft** (Branch `feature/shared-simulation`): Ein gemeinsamer,
+> headless Simulationskern für NEAT, REINFORCE, A2C, A3C und PPO entsteht unter
+> `src/snake_ai/`. Der unten beschriebene NEAT-Code ist der alte Stand und wird
+> schrittweise ersetzt.
+>
+> ```bash
+> uv sync                    # Python 3.14, Abhängigkeiten aus pyproject.toml
+> uv run pytest              # Regeltests des neuen Kerns
+> uv run ruff check .
+> ```
+>
+> Spielregeln: `configs/game.toml`. Planung und Entscheidungen liegen im
+> Seminar-Vault (`../Presentation/`).
+
 Snake mit NEAT: fünf relative Eingaben, eine Entscheidung für Links/Geradeaus/Rechts.
 Training ist mit Anzeige oder ohne Grafik auf mehreren CPU-Kernen möglich.
 

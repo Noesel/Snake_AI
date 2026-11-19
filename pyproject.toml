@@ -1,0 +1,44 @@
+[project]
+name = "snake-ai"
+version = "0.1.0"
+description = "Shared Snake simulation for comparing NEAT, REINFORCE, A2C, A3C and PPO"
+readme = "readme.md"
+requires-python = ">=3.14"
+dependencies = [
+    "numpy>=2.5,<3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2",
+    "ruff>=0.17",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.8,<0.14"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+# Legacy pixel-based NEAT code; removed once NEAT runs on the shared core.
+extend-exclude = [
+    "Snake_Game.py",
+    "c_*.py",
+    "evaluation.py",
+    "rendering.py",
+    "training.py",
+    "tests/support.py",
+    "tests/test_bait.py",
+    "tests/test_observation.py",
+    "tests/test_parallel.py",
+    "tests/test_sensors.py",
+    "tests/test_snake.py",
+    "tests/test_training.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -11,7 +11,15 @@
 > uv run ruff check .
 > uv sync --extra render     # zusätzlich pygame-ce für Fenster
 > uv run snake-ai play       # manuell spielen: Pfeiltasten/A-D, R neu, Esc
+> uv run snake-ai train ppo  # headless, Konfiguration: configs/ppo.toml
+> uv run snake-ai evaluate runs/ppo/<lauf>/snapshots/<stand>
+> uv run snake-ai watch runs/ppo/<lauf>/snapshots/<stand>
 > ```
+>
+> Jeder Lauf legt unter `runs/<verfahren>/<zeit>_<id>/` die effektive
+> Konfiguration (`config.json`), Versionen (`versions.json`), Kennzahlen
+> (`metrics.jsonl`) und Snapshots mit `meta.json` ab. Jeder Snapshot wird auf den
+> festen Seeds aus `configs/evaluation.toml` bewertet.
 >
 > Spielregeln: `configs/game.toml`. Planung und Entscheidungen liegen im
 > Seminar-Vault (`../Presentation/`).

@@ -1,0 +1,23 @@
+# PPO via Stable-Baselines3. [algorithm] is passed to the SB3 constructor.
+
+[env]
+local_awareness = false
+max_episode_steps = 10000
+
+[train]
+algorithm = "ppo"
+total_timesteps = 200000
+n_envs = 8
+seed = 0
+snapshot_every = 50000   # environment steps
+torch_threads = 4        # part of the 80 % CPU budget
+device = "cpu"           # small MLP: CPU measured faster than CUDA
+
+[algorithm]
+learning_rate = 0.0003
+n_steps = 256
+batch_size = 256
+n_epochs = 4
+gamma = 0.99
+gae_lambda = 0.95
+ent_coef = 0.01

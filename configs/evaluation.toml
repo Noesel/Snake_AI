@@ -1,0 +1,6 @@
+# Fixed evaluation games shared by all methods; never used for training.
+
+[evaluation]
+episodes = 20
+seed = 20261119
+max_steps = 10000

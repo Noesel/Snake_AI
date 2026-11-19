@@ -6,10 +6,10 @@ max_episode_steps = 10000
 
 [train]
 algorithm = "ppo"
-total_timesteps = 200000
+total_timesteps = 3000000
 n_envs = 8
 seed = 0
-snapshot_every = 50000   # environment steps
+snapshot_every = 500000  # environment steps
 torch_threads = 4        # part of the 80 % CPU budget
 device = "cpu"           # small MLP: CPU measured faster than CUDA
 
